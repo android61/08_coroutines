@@ -5,9 +5,11 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.logging.HttpLoggingInterceptor
-import ru.netology.coroutines.dto.*
+import ru.netology.coroutines.dto.Author
+import ru.netology.coroutines.dto.Comment
+import ru.netology.coroutines.dto.Post
+import ru.netology.coroutines.dto.PostWithAuthorAndComments
 import java.io.IOException
-import java.util.HashMap
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
@@ -15,7 +17,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 private val gson = Gson()
-private val BASE_URL = "http://127.0.0.1:9999"
+private const val BASE_URL = "http://127.0.0.1:9999"
 private val client = OkHttpClient.Builder()
     .addInterceptor(HttpLoggingInterceptor(::println).apply {
         level = HttpLoggingInterceptor.Level.BODY
@@ -27,33 +29,24 @@ fun main() {
     with(CoroutineScope(EmptyCoroutineContext)) {
         launch {
             try {
-                var authorsMap = HashMap<Long, Author>()
-                var authorsUnrequested = HashSet<Long>()
                 val posts = getPosts(client)
                     .map { post ->
-
-                        if (!authorsUnrequested.contains(post.authorId)) {
-                            authorsUnrequested.add(post.authorId)
-                            if (!authorsMap.containsKey(post.authorId))
-                                authorsMap.putIfAbsent(post.authorId, getAuthor(client, post.authorId))
-                        }
-
                         async {
-                            
-                            val postComments = getComments(client, post.id)
-                            postComments.forEach {
-                                if (!authorsUnrequested.contains(it.authorId)) {
-                                    authorsUnrequested.add(it.authorId)
-                                    if (!authorsMap.containsKey(it.authorId))
-                                        authorsMap.putIfAbsent(it.authorId, getAuthor(client, it.authorId))
-                                }
+                            val author = async {
+                                getAuthor(client, post.authorId)
                             }
-                            println("authors:$authorsMap")
-                            PostWithComments(post, getComments(client, post.id))
-                            PostWithCommentsAndAuthors(post, authorsMap, postComments)
+
+                            val comments = async {
+                                getComments(client, post.id)
+                            }
+
+                            PostWithAuthorAndComments(
+                                author.await(),
+                                post,
+                                comments.await(),
+                            )
                         }
                     }.awaitAll()
-
                 println(posts)
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -65,10 +58,7 @@ fun main() {
 
 suspend fun OkHttpClient.apiCall(url: String): Response {
     return suspendCoroutine { continuation ->
-        Request.Builder()
-            .url(url)
-            .build()
-            .let(::newCall)
+        Request.Builder().url(url).build().let(::newCall)
             .enqueue(object : Callback {
                 override fun onResponse(call: Call, response: Response) {
                     continuation.resume(response)
@@ -100,5 +90,5 @@ suspend fun getPosts(client: OkHttpClient): List<Post> =
 suspend fun getComments(client: OkHttpClient, id: Long): List<Comment> =
     makeRequest("$BASE_URL/api/slow/posts/$id/comments", client, object : TypeToken<List<Comment>>() {})
 
-suspend fun getAuthor(client: OkHttpClient, authorId: Long): Author =
-    makeRequest("$BASE_URL/api/authors/$authorId", client, object : TypeToken<Author>() {}) // slow не надо
+suspend fun getAuthor(client: OkHttpClient, id: Long): Author =
+    makeRequest("$BASE_URL/api/authors/$id", client, object : TypeToken<Author>() {})

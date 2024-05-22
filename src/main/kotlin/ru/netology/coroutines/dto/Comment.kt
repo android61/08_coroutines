@@ -10,5 +10,3 @@ data class Comment(
     val likedByMe: Boolean,
     val likes: Int = 0,
 )
-
-
